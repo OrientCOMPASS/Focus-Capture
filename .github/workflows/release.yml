@@ -42,7 +42,7 @@ jobs:
           - { label: windows-x86_64-msvc, os: windows-latest, artifact: focus_capture.dll }
           - { label: linux-x86_64-pipewire, os: ubuntu-latest, artifact: focus_capture.so,
               apt: "libpipewire-0.3-dev libspa-0.2-dev pkg-config libclang-dev" }
-          - { label: macos-aarch64-tap, os: macos-latest, artifact: libfocus_capture.dylib }
+          - { label: macos-aarch64-tap, os: macos-latest, artifact: focus_capture.dylib }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
@@ -96,7 +96,9 @@ jobs:
       - name: 下载三平台产物
         uses: actions/download-artifact@v7
         with:
-          pattern: lib-*
+          # archive:false 上传时 artifact 名即文件 basename（name 输入被忽略），
+          # 故按文件名 glob 匹配三平台产物
+          pattern: focus_capture*
           path: libs
           merge-multiple: true
 
@@ -137,7 +139,9 @@ jobs:
       - name: 下载三平台产物
         uses: actions/download-artifact@v7
         with:
-          pattern: lib-*
+          # archive:false 上传时 artifact 名即文件 basename（name 输入被忽略），
+          # 故按文件名 glob 匹配三平台产物
+          pattern: focus_capture*
           path: libs
           merge-multiple: true
 
