@@ -100,14 +100,20 @@ jobs:
           path: libs
           merge-multiple: true
 
+      - name: 扁平化产物（兼容 artifact 任意目录层级）
+        run: |
+          mkdir -p libs_flat
+          find libs -type f | while read -r f; do cp "$f" "libs_flat/$(basename "$f")"; done
+          ls -la libs_flat/
+          test -f libs_flat/focus_capture.dll
+          test -f libs_flat/focus_capture.so
+          test -f libs_flat/focus_capture.dylib
+
       - name: 组装三库单包
         run: |
-          test -f libs/focus_capture.dll
-          test -f libs/focus_capture.so
-          test -f libs/focus_capture.dylib
           mkdir -p stage dist
           cp plugin.json panel.html README.md LICENSE stage/
-          cp libs/focus_capture.dll libs/focus_capture.so libs/focus_capture.dylib stage/
+          cp libs_flat/focus_capture.dll libs_flat/focus_capture.so libs_flat/focus_capture.dylib stage/
           (cd stage && zip -q -r ../dist/plugin.zip .)
           ls -la dist/
 
@@ -169,15 +175,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+      - name: 扁平化产物（兼容 artifact 任意目录层级）
+        run: |
+          mkdir -p libs_flat
+          find libs -type f | while read -r f; do cp "$f" "libs_flat/$(basename "$f")"; done
+          ls -la libs_flat/
+          test -f libs_flat/focus_capture.dll
+          test -f libs_flat/focus_capture.so
+          test -f libs_flat/focus_capture.dylib
+
       - name: 组装发布包
         run: |
           VER="${{ steps.ver.outputs.version }}"
-          test -f libs/focus_capture.dll
-          test -f libs/focus_capture.so
-          test -f libs/focus_capture.dylib
           mkdir -p stage dist
           cp plugin.json panel.html README.md LICENSE stage/
-          cp libs/focus_capture.dll libs/focus_capture.so libs/focus_capture.dylib stage/
+          cp libs_flat/focus_capture.dll libs_flat/focus_capture.so libs_flat/focus_capture.dylib stage/
           (cd stage && zip -q -r ../dist/plugin.zip .)
           cp dist/plugin.zip "dist/opss.focus-capture-v${VER}.zip"
           # 上传的 plugin.json 快照：downloadUrl 指向版本化资产
