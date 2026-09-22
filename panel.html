@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FocusCapture</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 18px 20px 28px;
+    font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: hsl(var(--on-surface));
+    background: transparent;
+    font-size: 14px; line-height: 1.55;
+  }
+  h2 { margin: 0 0 2px; font-size: 17px; display: flex; align-items: center; gap: 8px; }
+  .sub { color: hsl(var(--on-surface-variant)); font-size: 12px; margin-bottom: 16px; }
+  .card {
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--surface-container));
+    border-radius: 14px; padding: 14px 16px; margin-bottom: 14px;
+  }
+  .status-row { display: flex; align-items: center; gap: 10px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; background: hsl(var(--outline)); }
+  .dot.capturing { background: #e53935; box-shadow: 0 0 0 4px rgba(229,57,53,.18); animation: pulse 1.6s infinite; }
+  .dot.starting, .dot.stopping { background: hsl(var(--tertiary)); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .45; } }
+  .phase { font-weight: 600; font-size: 15px; }
+  .target { margin-top: 8px; display: none; }
+  .target .app { font-weight: 600; }
+  .target .meta { color: hsl(var(--on-surface-variant)); font-size: 12px; }
+  .err {
+    display: none; margin-top: 10px; padding: 8px 12px; border-radius: 10px;
+    background: hsl(var(--error) / .1); color: hsl(var(--error)); font-size: 12.5px;
+    white-space: pre-wrap;
+  }
+  .row { display: flex; align-items: center; gap: 12px; margin: 10px 0; }
+  .row label { flex: none; min-width: 86px; color: hsl(var(--on-surface-variant)); }
+  input[type=range] { flex: 1; accent-color: hsl(var(--primary)); }
+  .val { min-width: 48px; text-align: right; font-variant-numeric: tabular-nums; }
+  button {
+    border: 1px solid hsl(var(--outline)); background: hsl(var(--surface-bright));
+    color: hsl(var(--on-surface)); padding: 8px 18px; border-radius: 999px;
+    font-size: 13.5px; cursor: pointer;
+    white-space: nowrap; flex: none;
+  }
+  button.primary { background: hsl(var(--primary)); color: hsl(var(--on-primary)); border-color: transparent; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.capturing { background: hsl(var(--error)); color: #fff; border-color: transparent; animation: pulse 1s infinite; }
+  kbd {
+    background: hsl(var(--surface-variant)); border: 1px solid hsl(var(--outline));
+    border-bottom-width: 2px; border-radius: 6px; padding: 1px 7px;
+    font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+    white-space: nowrap; flex: none; max-width: 100%; overflow-x: auto;
+  }
+  .hint { color: hsl(var(--on-surface-variant)); font-size: 12px; margin-top: 6px; }
+  .badge {
+    font-size: 11px; padding: 1px 8px; border-radius: 999px;
+    border: 1px solid hsl(var(--outline)); color: hsl(var(--on-surface-variant));
+  }
+  ol { margin: 6px 0 0; padding-left: 20px; }
+  li { margin: 3px 0; }
+  .switch { display:flex; align-items:center; gap:8px; }
+  .switch input { accent-color: hsl(var(--primary)); width:16px; height:16px; }
+</style>
+</head>
+<body>
+  <h2>🎯 FocusCapture</h2>
+  <div class="sub" id="subTitle"></div>
+
+  <div class="card">
+    <div class="status-row">
+      <span class="dot" id="dot"></span>
+      <span class="phase" id="phaseText"></span>
+      <span style="flex:1"></span>
+      <button class="primary" id="stopBtn" disabled></button>
+    </div>
+    <div class="target" id="targetBox">
+      <div class="app" id="appName"></div>
+      <div class="meta" id="appMeta"></div>
+    </div>
+    <div class="err" id="errBox"></div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <label id="hotkeyLabel"></label>
+      <kbd id="hotkeyVal">?</kbd>
+      <span style="flex:1"></span>
+      <button id="captureBtn"></button>
+    </div>
+    <div class="hint" id="hotkeyHint"></div>
+    <div class="row">
+      <label id="gainLabel"></label>
+      <input type="range" id="gain" min="0" max="2" step="0.05" value="1" />
+      <span class="val" id="gainVal">100%</span>
+    </div>
+    <div class="row switch">
+      <input type="checkbox" id="notifyChk" checked />
+      <label for="notifyChk" id="notifyLabel" style="min-width:0"></label>
+    </div>
+  </div>
+
+  <div class="card">
+    <strong id="howTitle"></strong>
+    <ol id="howList"></ol>
+    <div class="hint" id="noteHint"></div>
+  </div>
+
+<script>
+function call(api, args) {
+  return new Promise((resolve, reject) => {
+    const id = Math.random().toString(36).slice(2);
+    const onMsg = (e) => {
+      if (e.data && e.data.__micyou === 1 && e.data.id === id) {
+        window.removeEventListener('message', onMsg);
+        e.data.ok ? resolve(e.data.value) : reject(new Error(e.data.error));
+      }
+    };
+    window.addEventListener('message', onMsg);
+    window.parent.postMessage({ __micyou: 1, id, api, args: args || {} }, '*');
+  });
+}
+
+const T = {
+  'zh-CN': {
+    sub: '把焦点应用的声音混入麦克风流（进程级捕获，支持 Windows / Linux / macOS）',
+    idle: '空闲', starting: '启动中…', capturing: '捕获中', stopping: '停止中…',
+    stop: '停止捕获', gain: '混音增益', notify: '状态变化时弹系统通知',
+    hotkey: '快捷键', capture: '按键捕获', cancel: '取消（Esc）',
+    capturingHint: '正在捕获：按下键盘组合键（需含 ctrl/alt/shift/win 修饰键，或直接用 F 键等）…',
+    hotkeyHint: '支持 ctrl/alt/shift/win 修饰键 + 字母/数字/F1–F24/常用键（如 ctrl+shift+f8）。修改后立即生效（旧组合自动失效）。鼠标侧键暂不支持——监听鼠标属于系统级输入钩子，计划由宿主 API 统一提供后再开放。',
+    how: '使用方法',
+    steps: [
+      '把要共享声音的应用（游戏 / 音乐播放器 / 浏览器…）切到前台',
+      '按下全局快捷键，该应用的声音即混入麦克风，通话对方可听到',
+      '在任意应用中再按同一快捷键即停止；目标应用退出时也会自动停止',
+    ],
+    note: '提示：需在 MicYou 已连接手机 / 串流运行时混音才会真正送达对方。若宿主开启了降噪等处理，建议在「设置 → 音频 → 处理链」把 Plugins 节点保持在 AEC 之后，避免应用声音被回声消除吃掉。',
+    errPrefix: '错误：',
+  },
+  en: {
+    sub: 'Mix the focused app’s audio into the mic stream (per-process capture on Windows / Linux / macOS)',
+    idle: 'Idle', starting: 'Starting…', capturing: 'Capturing', stopping: 'Stopping…',
+    stop: 'Stop capture', gain: 'Mix gain', notify: 'System notifications on state changes',
+    hotkey: 'Hotkey', capture: 'Capture keys', cancel: 'Cancel (Esc)',
+    capturingHint: 'Listening: press a key combo (include a ctrl/alt/shift/win modifier, or use an F-key etc.)…',
+    hotkeyHint: 'Supports ctrl/alt/shift/win modifiers + letters/digits/F1–F24/common keys (e.g. ctrl+shift+f8). Changes apply immediately (the old combo stops working). Mouse side buttons are not supported yet — system-level mouse listening is planned as a host API extension.',
+    how: 'How to use',
+    steps: [
+      'Bring the app whose audio you want to share (game / player / browser…) to the foreground',
+      'Press the global hotkey — its audio is mixed into the mic and peers can hear it',
+      'Press the same hotkey anywhere to stop; capture also stops when the target app exits',
+    ],
+    note: 'Note: audio only reaches peers while MicYou is streaming. If host DSP (noise reduction etc.) colors the sound, keep the Plugins node after AEC in Settings → Audio → Processing chain.',
+    errPrefix: 'Error: ',
+  },
+};
+let t = T['zh-CN'];
+const $ = (id) => document.getElementById(id);
+let lastGain = 1;
+
+// ── hotkey capture (keyboard only; mouse support planned host-side) ──
+let captureMode = false;
+
+function codeToToken(code) {
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3).toLowerCase();
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) return code.toLowerCase();
+  const map = {
+    Space: 'space', Enter: 'enter', NumpadEnter: 'enter', Tab: 'tab',
+    Backspace: 'backspace', Delete: 'delete', Insert: 'insert',
+    Home: 'home', End: 'end', PageUp: 'pageup', PageDown: 'pagedown',
+    ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+    Minus: 'minus', Equal: 'equal', BracketLeft: 'bracketleft', BracketRight: 'bracketright',
+    Backslash: 'backslash', Semicolon: 'semicolon', Quote: 'quote',
+    Comma: 'comma', Period: 'period', Slash: 'slash', Backquote: 'backquote',
+    Pause: 'pause',
+  };
+  return map[code] || null;
+}
+
+function modsOf(e) {
+  const m = [];
+  if (e.ctrlKey) m.push('ctrl');
+  if (e.altKey) m.push('alt');
+  if (e.shiftKey) m.push('shift');
+  if (e.metaKey) m.push('win');
+  return m;
+}
+
+async function saveHotkey(str) {
+  exitCaptureMode();
+  try {
+    await call('set_config', { key: 'hotkey', value: str });
+    await call('trigger', { action: 'apply' });
+  } catch (e) { console.warn(e); }
+  setTimeout(refresh, 200);
+}
+
+function onCaptureKey(e) {
+  e.preventDefault(); e.stopPropagation();
+  if (e.code === 'Escape') { exitCaptureMode(); return; }
+  const tok = codeToToken(e.code);
+  if (!tok) return; // modifier-only press etc.: keep waiting
+  const mods = modsOf(e);
+  // Bare letters/digits would hijack typing — require a modifier for them.
+  if (mods.length === 0 && /^[a-z0-9]$/.test(tok)) return;
+  saveHotkey([...mods, tok].join('+'));
+}
+
+function enterCaptureMode() {
+  captureMode = true;
+  $('captureBtn').textContent = t.cancel;
+  $('captureBtn').classList.add('capturing');
+  $('hotkeyHint').textContent = t.capturingHint;
+  window.addEventListener('keydown', onCaptureKey, true);
+}
+function exitCaptureMode() {
+  captureMode = false;
+  $('captureBtn').textContent = t.capture;
+  $('captureBtn').classList.remove('capturing');
+  window.removeEventListener('keydown', onCaptureKey, true);
+}
+$('captureBtn').addEventListener('click', () => {
+  captureMode ? exitCaptureMode() : enterCaptureMode();
+});
+
+// ── rendering ──
+function render(cfg) {
+  const st = (cfg && cfg.fc_status) || { phase: 'idle', app: '', pid: 0, rate: 0, channels: 0, error: '', hotkey: '?', hotkeyOk: false, hotkeyEngine: 'none' };
+  const busy = st.phase === 'capturing' || st.phase === 'starting' || st.phase === 'stopping';
+
+  $('dot').className = 'dot ' + (st.phase === 'idle' ? '' : st.phase);
+  $('phaseText').textContent = t[st.phase] || st.phase;
+  $('stopBtn').textContent = t.stop;
+  $('stopBtn').disabled = !busy;
+
+  $('targetBox').style.display = busy ? 'block' : 'none';
+  if (busy && st.app) {
+    $('appName').textContent = st.app;
+    const meta = [];
+    if (st.pid) meta.push('pid ' + st.pid);
+    if (st.rate) meta.push(st.rate + ' Hz');
+    if (st.channels) meta.push(st.channels + ' ch');
+    meta.push('→ 48 kHz mono mix');
+    $('appMeta').textContent = meta.join(' · ');
+  }
+
+  const err = st.error || '';
+  $('errBox').style.display = err ? 'block' : 'none';
+  if (err) $('errBox').textContent = t.errPrefix + err;
+
+  $('hotkeyVal').textContent = String(st.hotkey || '?');
+  $('hotkeyVal').style.opacity = st.hotkeyOk === false ? '0.5' : '1';
+  if (!captureMode) $('hotkeyHint').textContent = t.hotkeyHint;
+
+  if (cfg) {
+    if (typeof cfg.gain === 'number' && Math.abs(cfg.gain - lastGain) > 1e-6 && !$('gain').matches(':active')) {
+      $('gain').value = cfg.gain;
+    }
+    lastGain = Number($('gain').value);
+    $('gainVal').textContent = Math.round(Number($('gain').value) * 100) + '%';
+    if (typeof cfg.notify === 'boolean') $('notifyChk').checked = cfg.notify;
+  }
+}
+
+function applyTexts() {
+  $('subTitle').textContent = t.sub;
+  $('gainLabel').textContent = t.gain;
+  $('notifyLabel').textContent = t.notify;
+  $('hotkeyLabel').textContent = t.hotkey;
+  $('captureBtn').textContent = captureMode ? t.cancel : t.capture;
+  $('howTitle').textContent = t.how;
+  $('howList').innerHTML = t.steps.map((s) => `<li>${s}</li>`).join('');
+  $('noteHint').textContent = t.note;
+  if (!captureMode) $('hotkeyHint').textContent = t.hotkeyHint;
+}
+
+async function refresh() {
+  try {
+    const cfg = await call('get_config', {});
+    render(cfg);
+  } catch (e) { /* host unavailable yet */ }
+}
+
+$('gain').addEventListener('input', () => {
+  $('gainVal').textContent = Math.round(Number($('gain').value) * 100) + '%';
+  lastGain = Number($('gain').value);
+});
+$('gain').addEventListener('change', async () => {
+  const v = Number($('gain').value);
+  try {
+    await call('set_config', { key: 'gain', value: v });
+    await call('trigger', { action: 'apply' });
+  } catch (e) { console.warn(e); }
+});
+$('notifyChk').addEventListener('change', async () => {
+  try {
+    await call('set_config', { key: 'notify', value: $('notifyChk').checked });
+    await call('trigger', { action: 'apply' });
+  } catch (e) { console.warn(e); }
+});
+$('stopBtn').addEventListener('click', async () => {
+  try { await call('trigger', { action: 'stop' }); } catch (e) { console.warn(e); }
+  setTimeout(refresh, 300);
+});
+
+(async function init() {
+  try {
+    const lang = await call('locale');
+    t = String(lang).startsWith('zh') ? T['zh-CN'] : T.en;
+  } catch (e) { /* keep zh-CN */ }
+  applyTexts();
+  await refresh();
+  setInterval(refresh, 1000);
+})();
+</script>
+</body>
+</html>
