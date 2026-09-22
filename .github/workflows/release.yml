@@ -3,13 +3,13 @@ name: Build & Release
 # 操作手册：
 #   * push 到 main / dev（任何提交，含直接改 plugin.json 版本号）→
 #     仅自动构建 development build：三平台矩阵编译 + 单测，产物作为
-#     Actions artifact（focus-capture-development，三库 plugin.zip），
+#     Actions artifact（focus-capture-development，三库单包目录），
 #     **绝不创建 release / tag**。
 #   * 发 release：Actions 页面 → Run workflow（workflow_dispatch），
 #     可选 bump 档位（none/patch/minor/major，默认 none = 用 main 上
 #     plugin.json 的当前版本）。流程：三平台构建 → 打包 → 打 tag v<ver> →
-#     创建 Release（资产：opss.focus-capture-v<ver>.zip 主包 + plugin.zip
-#     旧宿主更新兼容别名 + plugin.json 快照 + market-entry.json 手动市场 PR 用）。
+#     创建 Release（资产：opss.focus-capture-v<ver>.zip 主包 + plugin.json（与 zip 内
+#     manifest 同一份，供手动市场 PR 与更新检查））。
 #     若选择 bump 档位，会把新版本号回提交到 main（提交信息带 [skip ci]）。
 #   * 同一版本重复发 release 会直接失败并提示（tag 已存在），防止误覆盖。
 #   * 提交信息含 [skip ci] → 整个 workflow 跳过。
@@ -189,36 +189,29 @@ jobs:
           test -f libs_flat/focus_capture.so
           test -f libs_flat/focus_capture.dylib
 
-      - name: 组装发布包
+      - name: 组装发布包（plugin.json 全通道同一份）
         run: |
           VER="${{ steps.ver.outputs.version }}"
-          mkdir -p stage dist
-          cp plugin.json panel.html README.md LICENSE stage/
-          cp libs_flat/focus_capture.dll libs_flat/focus_capture.so libs_flat/focus_capture.dylib stage/
-          (cd stage && zip -q -r ../dist/plugin.zip .)
-          cp dist/plugin.zip "dist/opss.focus-capture-v${VER}.zip"
-          # 上传的 plugin.json 快照：downloadUrl 指向版本化资产
+          # 先写入版本化 downloadUrl 再打包 ⇒ zip 内 manifest == release 的
+          # plugin.json 资产 == 手动市场 PR 所用文件，三者同一份
           python3 - <<PY
           import json
           m = json.load(open('plugin.json'))
           m['downloadUrl'] = f"https://github.com/OrientCOMPASS/Focus-Capture/releases/download/v{m['version']}/opss.focus-capture-v{m['version']}.zip"
           json.dump(m, open('plugin.json', 'w'), ensure_ascii=False, indent=2)
-          entry = dict(m)
-          entry.pop('config', None)
-          entry.update({
-            "updateUrl": "https://micyou-dev.github.io/MicYou-Plugins/plugin/opss.focus-capture/plugin.json",
-            "downloadUrl": f"https://github.com/OrientCOMPASS/Focus-Capture/releases/download/v{m['version']}/opss.focus-capture-v{m['version']}.zip",
-            "readmeUrl": "https://raw.githubusercontent.com/OrientCOMPASS/Focus-Capture/refs/heads/main/README.md",
-          })
-          json.dump(entry, open('market-entry.json', 'w'), ensure_ascii=False, indent=2)
           PY
+          mkdir -p stage dist
+          cp plugin.json panel.html README.md LICENSE stage/
+          cp libs_flat/focus_capture.dll libs_flat/focus_capture.so libs_flat/focus_capture.dylib stage/
+          (cd stage && zip -q -r ../dist/opss.focus-capture-v${VER}.zip .)
+          ls -la dist/
 
       - name: 生成变更日志（自上一个 tag）
         run: |
           LAST=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
           if [ -n "$LAST" ]; then git log --oneline "$LAST..HEAD" > /tmp/notes.md; else git log --oneline -20 > /tmp/notes.md; fi
           echo "" >> /tmp/notes.md
-          echo "三平台单包：windows x86_64 / linux x86_64 (PipeWire) / macos aarch64 (Process Tap, 14.4+)。market-entry.json 用于手动向 MicYou-Plugins 提 PR。" >> /tmp/notes.md
+          echo "三平台单包：windows x86_64 / linux x86_64 (PipeWire) / macos aarch64 (Process Tap, 14.4+)。release 的 plugin.json 资产可直接用于向 MicYou-Plugins 提手动市场 PR。" >> /tmp/notes.md
 
       - name: 打 tag 并发布 Release
         run: |
@@ -227,7 +220,7 @@ jobs:
           git config user.email "ci@users.noreply.github.com"
           git tag "v${VER}"
           git push origin "v${VER}"
-          gh release create "v${VER}" "dist/opss.focus-capture-v${VER}.zip" dist/plugin.zip plugin.json market-entry.json \
+          gh release create "v${VER}" "dist/opss.focus-capture-v${VER}.zip" plugin.json \
             --title "v${VER}" --notes-file /tmp/notes.md
         env:
           GH_TOKEN: ${{ github.token }}
