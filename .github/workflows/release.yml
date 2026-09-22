@@ -93,11 +93,22 @@ jobs:
         with:
           ref: ${{ github.ref_name }}
 
+      # GitHub 产物存储偶发瞬时故障（blob 下载重试耗尽），加一层工作流级重试
       - name: 下载三平台产物
+        id: dl
+        continue-on-error: true
         uses: actions/download-artifact@v7
         with:
           # archive:false 上传时 artifact 名即文件 basename（name 输入被忽略），
           # 故按文件名 glob 匹配三平台产物
+          pattern: focus_capture*
+          path: libs
+          merge-multiple: true
+
+      - name: 下载三平台产物（自动重试一次）
+        if: steps.dl.outcome != 'success'
+        uses: actions/download-artifact@v7
+        with:
           pattern: focus_capture*
           path: libs
           merge-multiple: true
@@ -136,11 +147,22 @@ jobs:
           ref: ${{ github.ref_name }}
           fetch-depth: 0
 
+      # GitHub 产物存储偶发瞬时故障（blob 下载重试耗尽），加一层工作流级重试
       - name: 下载三平台产物
+        id: dl
+        continue-on-error: true
         uses: actions/download-artifact@v7
         with:
           # archive:false 上传时 artifact 名即文件 basename（name 输入被忽略），
           # 故按文件名 glob 匹配三平台产物
+          pattern: focus_capture*
+          path: libs
+          merge-multiple: true
+
+      - name: 下载三平台产物（自动重试一次）
+        if: steps.dl.outcome != 'success'
+        uses: actions/download-artifact@v7
+        with:
           pattern: focus_capture*
           path: libs
           merge-multiple: true
