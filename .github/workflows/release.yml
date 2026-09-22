@@ -70,8 +70,9 @@ jobs:
         run: |
           mkdir -p stage
           case "${{ matrix.artifact }}" in
-            libfocus_capture.dylib) cp target/release/libfocus_capture.dylib stage/focus_capture.dylib ;;
-            *) cp target/release/${{ matrix.artifact }} stage/ ;;
+            focus_capture.dylib) cp target/release/libfocus_capture.dylib stage/focus_capture.dylib ;;
+            focus_capture.so)    cp target/release/libfocus_capture.so    stage/focus_capture.so ;;
+            *)                   cp target/release/${{ matrix.artifact }} stage/ ;;
           esac
           ls -la stage/
 

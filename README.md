@@ -17,7 +17,7 @@
 
 ## 安装
 
-1. 下载 Release 中的 `plugin.zip`（或版本化 `opss.focus-capture-v*.zip`，内容相同；开发版见 prerelease `development`）
+1. 下载 Release 中的 `plugin.zip`（或版本化 `opss.focus-capture-v*.zip`，内容相同）；开发版见每次 push 构建的 Actions artifact `focus-capture-development`
 2. 把 zip 内容解压到插件目录的 `opss.focus-capture/` 子目录（Windows `%APPDATA%\micyou\plugins\`，Linux/macOS `~/.config/micyou/plugins/`）；包内含三个动态库（`.dll/.so/.dylib`），**宿主按平台自动选用**
 3. 回到插件页点「刷新」，启用 **FocusCapture**
 4. 启用后宿主会自动把合成节点 `Plugins` 插入处理链（AEC 之后）
@@ -81,8 +81,8 @@
 
 `.github/workflows/release.yml`（各平台原生工具链，参考 Mambo-RVC-ONNX 的方式）：
 
-- **每次 push（main/dev）**：三平台矩阵构建（`windows-latest` MSVC / `ubuntu-latest` + `libpipewire-0.3-dev libspa-0.2-dev libclang-dev` / `macos-latest` arm64）→ 各跑 `cargo test` → 产物去 `lib` 前缀归一化 → 打包**单包含三库**的 `plugin.zip`（+ `plugin.json`/`panel.html`/`README.md`/`LICENSE`）→ 覆盖发布到滚动 prerelease **`development`**，并留 Actions artifact；
-- **push 到 main 额外**：bump patch 版本并提交（提交信息带 `[skip ci]` 防自触发）→ 打 `v<ver>` tag → 正式 release（资产：`plugin.zip`、版本化 zip、`plugin.json`）；
+- **每次 push（main/dev，含直接改版本号）**：仅自动构建 development build——三平台矩阵（`windows-latest` MSVC / `ubuntu-latest` + `libpipewire-0.3-dev libspa-0.2-dev libclang-dev` / `macos-latest` arm64）各跑 `cargo test` → 产物去 `lib` 前缀归一化 → 打包**单包含三库**的 `plugin.zip` → Actions artifact `focus-capture-development`；**不创建 release / tag**；
+- **发 release = 手动**：Actions 页 Run workflow（可选 bump 档位 none/patch/minor/major，默认 none 用 main 上当前版本）→ 防重复检查 → 打 tag `v<ver>` + Release（资产：版本化 zip、`plugin.zip` 别名、`plugin.json` 快照、`market-entry.json`）；选 bump 档位时新版本号回提交 main（`[skip ci]`）；
 - 仓库：`https://github.com/OrientCOMPASS/Focus-Capture`。
 
 本地验证：Windows 目标可交叉编译（mingw `x86_64-pc-windows-gnu` 或 `cargo xwin build --target x86_64-pc-windows-msvc`）；macOS 目标 `cargo check --target aarch64-apple-darwin` 类型检查；Linux 原生编译需上述三个 dev 包。
