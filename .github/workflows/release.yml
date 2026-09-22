@@ -1,1 +1,224 @@
-{"success":false,"request_id":"15d31f8b-4fa3-4ffe-b48c-1216b9c2e2f9","data":{"code":"Bad_Request","details":"invalid workspace path"}}
+name: Build & Release
+
+# 操作手册：
+#   * push 到 main / dev（任何提交，含直接改 plugin.json 版本号）→
+#     仅自动构建 development build：三平台矩阵编译 + 单测，产物作为
+#     Actions artifact（focus-capture-development，三库 plugin.zip），
+#     **绝不创建 release / tag**。
+#   * 发 release：Actions 页面 → Run workflow（workflow_dispatch），
+#     可选 bump 档位（none/patch/minor/major，默认 none = 用 main 上
+#     plugin.json 的当前版本）。流程：三平台构建 → 打包 → 打 tag v<ver> →
+#     创建 Release（资产：opss.focus-capture-v<ver>.zip 主包 + plugin.zip
+#     旧宿主更新兼容别名 + plugin.json 快照 + market-entry.json 手动市场 PR 用）。
+#     若选择 bump 档位，会把新版本号回提交到 main（提交信息带 [skip ci]）。
+#   * 同一版本重复发 release 会直接失败并提示（tag 已存在），防止误覆盖。
+#   * 提交信息含 [skip ci] → 整个 workflow 跳过。
+#   * 无 pull_request 触发器：PR 不跑 CI，合并进 main 后按 push 规则出 dev 构建。
+
+on:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Release 版本档位：none = 使用 main 上 plugin.json 当前版本"
+        type: choice
+        default: none
+        options: [none, patch, minor, major]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: 构建 ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: windows-x86_64-msvc, os: windows-latest, artifact: focus_capture.dll }
+          - { label: linux-x86_64-pipewire, os: ubuntu-latest, artifact: focus_capture.so,
+              apt: "libpipewire-0.3-dev libspa-0.2-dev pkg-config libclang-dev" }
+          - { label: macos-aarch64-tap, os: macos-latest, artifact: libfocus_capture.dylib }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: 安装 Rust 工具链（原生）
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Cargo 依赖
+        uses: Swatinem/rust-cache@v2
+
+      - name: "安装系统依赖 (Linux: PipeWire headers + bindgen 用 libclang)"
+        if: matrix.apt != ''
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.apt }}
+
+      - name: 单元测试
+        run: cargo test --release
+
+      - name: Release 构建
+        run: cargo build --release
+
+      - name: 归一化产物名（去 lib 前缀，宿主按平台补后缀）
+        shell: bash
+        run: |
+          mkdir -p stage
+          case "${{ matrix.artifact }}" in
+            libfocus_capture.dylib) cp target/release/libfocus_capture.dylib stage/focus_capture.dylib ;;
+            *) cp target/release/${{ matrix.artifact }} stage/ ;;
+          esac
+          ls -la stage/
+
+      - name: 上传平台产物
+        uses: actions/upload-artifact@v7
+        with:
+          name: lib-${{ matrix.label }}
+          path: stage/*
+          archive: false
+
+  dev-package:
+    name: development 包（仅 push）
+    if: github.event_name == 'push'
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: 下载三平台产物
+        uses: actions/download-artifact@v7
+        with:
+          pattern: lib-*
+          path: libs
+          merge-multiple: true
+
+      - name: 组装三库单包
+        run: |
+          test -f libs/focus_capture.dll
+          test -f libs/focus_capture.so
+          test -f libs/focus_capture.dylib
+          mkdir -p stage dist
+          cp plugin.json panel.html README.md LICENSE stage/
+          cp libs/focus_capture.dll libs/focus_capture.so libs/focus_capture.dylib stage/
+          (cd stage && zip -q -r ../dist/plugin.zip .)
+          ls -la dist/
+
+      - name: 上传 development artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: focus-capture-development
+          path: dist/plugin.zip
+
+  release:
+    name: 手动发布 Release
+    if: github.event_name == 'workflow_dispatch'
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: 下载三平台产物
+        uses: actions/download-artifact@v7
+        with:
+          pattern: lib-*
+          path: libs
+          merge-multiple: true
+
+      - name: 决定版本号（bump 档位 / 防重复）
+        id: ver
+        run: |
+          python3 - <<'PY'
+          import json, os
+          p = 'plugin.json'
+          m = json.load(open(p))
+          maj, min_, pat = [int(x) for x in m['version'].split('.')]
+          bump = os.environ['BUMP']
+          if bump == 'patch':
+              pat += 1
+          elif bump == 'minor':
+              min_ += 1; pat = 0
+          elif bump == 'major':
+              maj += 1; min_ = 0; pat = 0
+          ver = f"{maj}.{min_}.{pat}"
+          m['version'] = ver
+          json.dump(m, open(p, 'w'), ensure_ascii=False, indent=2)
+          open(os.environ['GITHUB_OUTPUT'], 'a').write(f"version={ver}\n")
+          open(os.environ['GITHUB_OUTPUT'], 'a').write(f"bumped={'true' if bump != 'none' else 'false'}\n")
+          print("release version:", ver, f"(bump={bump})")
+          PY
+        env:
+          BUMP: ${{ github.event.inputs.bump }}
+
+      - name: 防止重复发布同版本
+        run: |
+          if gh release view "v${{ steps.ver.outputs.version }}" >/dev/null 2>&1; then
+            echo "::error::release v${{ steps.ver.outputs.version }} 已存在；请在 main 修改 plugin.json 版本或选择 bump 档位"
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: 组装发布包
+        run: |
+          VER="${{ steps.ver.outputs.version }}"
+          test -f libs/focus_capture.dll
+          test -f libs/focus_capture.so
+          test -f libs/focus_capture.dylib
+          mkdir -p stage dist
+          cp plugin.json panel.html README.md LICENSE stage/
+          cp libs/focus_capture.dll libs/focus_capture.so libs/focus_capture.dylib stage/
+          (cd stage && zip -q -r ../dist/plugin.zip .)
+          cp dist/plugin.zip "dist/opss.focus-capture-v${VER}.zip"
+          # 上传的 plugin.json 快照：downloadUrl 指向版本化资产
+          python3 - <<PY
+          import json
+          m = json.load(open('plugin.json'))
+          m['downloadUrl'] = f"https://github.com/OrientCOMPASS/Focus-Capture/releases/download/v{m['version']}/opss.focus-capture-v{m['version']}.zip"
+          json.dump(m, open('plugin.json', 'w'), ensure_ascii=False, indent=2)
+          entry = dict(m)
+          entry.pop('config', None)
+          entry.update({
+            "updateUrl": "https://micyou-dev.github.io/MicYou-Plugins/plugin/opss.focus-capture/plugin.json",
+            "downloadUrl": f"https://github.com/OrientCOMPASS/Focus-Capture/releases/download/v{m['version']}/opss.focus-capture-v{m['version']}.zip",
+            "readmeUrl": "https://raw.githubusercontent.com/OrientCOMPASS/Focus-Capture/refs/heads/main/README.md",
+          })
+          json.dump(entry, open('market-entry.json', 'w'), ensure_ascii=False, indent=2)
+          PY
+
+      - name: 生成变更日志（自上一个 tag）
+        run: |
+          LAST=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -n "$LAST" ]; then git log --oneline "$LAST..HEAD" > /tmp/notes.md; else git log --oneline -20 > /tmp/notes.md; fi
+          echo "" >> /tmp/notes.md
+          echo "三平台单包：windows x86_64 / linux x86_64 (PipeWire) / macos aarch64 (Process Tap, 14.4+)。market-entry.json 用于手动向 MicYou-Plugins 提 PR。" >> /tmp/notes.md
+
+      - name: 打 tag 并发布 Release
+        run: |
+          VER="${{ steps.ver.outputs.version }}"
+          git config user.name "focus-capture-ci"
+          git config user.email "ci@users.noreply.github.com"
+          git tag "v${VER}"
+          git push origin "v${VER}"
+          gh release create "v${VER}" "dist/opss.focus-capture-v${VER}.zip" dist/plugin.zip plugin.json market-entry.json \
+            --title "v${VER}" --notes-file /tmp/notes.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: bump 回提交到 main（[skip ci]）
+        if: steps.ver.outputs.bumped == 'true'
+        run: |
+          git add plugin.json
+          git commit -m "chore(release): bump version to ${{ steps.ver.outputs.version }} [skip ci]"
+          git push origin HEAD:main
+        env:
+          GH_TOKEN: ${{ github.token }}
