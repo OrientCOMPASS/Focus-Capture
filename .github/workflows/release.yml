@@ -97,16 +97,6 @@ jobs:
 
       # GitHub 产物存储偶发瞬时故障（blob 下载重试耗尽），加一层工作流级重试
       - name: 下载三平台产物
-        id: dl
-        continue-on-error: true
-        uses: actions/download-artifact@v7
-        with:
-          pattern: lib-*
-          path: libs
-          merge-multiple: true
-
-      - name: 下载三平台产物（自动重试一次）
-        if: steps.dl.outcome != 'success'
         uses: actions/download-artifact@v7
         with:
           pattern: lib-*
@@ -122,19 +112,20 @@ jobs:
           test -f libs_flat/focus_capture.so
           test -f libs_flat/focus_capture.dylib
 
-      - name: 组装三库单包
+      - name: 组装插件包目录（根即 plugin.json，可直接安装/导入）
         run: |
-          mkdir -p stage dist
+          mkdir -p stage
           cp plugin.json panel.html README.md LICENSE stage/
           cp libs_flat/focus_capture.dll libs_flat/focus_capture.so libs_flat/focus_capture.dylib stage/
-          (cd stage && zip -q -r ../dist/plugin.zip .)
-          ls -la dist/
+          ls -la stage/
 
+      # artifact zip 的根即包内容（upload-artifact 会剥离公共父目录），
+      # 用户下载该 artifact 后无需解套、直接解压安装或应用内导入
       - name: 上传 development artifact
         uses: actions/upload-artifact@v7
         with:
           name: focus-capture-development
-          path: dist/plugin.zip
+          path: stage
 
   release:
     name: 手动发布 Release
@@ -149,16 +140,6 @@ jobs:
 
       # GitHub 产物存储偶发瞬时故障（blob 下载重试耗尽），加一层工作流级重试
       - name: 下载三平台产物
-        id: dl
-        continue-on-error: true
-        uses: actions/download-artifact@v7
-        with:
-          pattern: lib-*
-          path: libs
-          merge-multiple: true
-
-      - name: 下载三平台产物（自动重试一次）
-        if: steps.dl.outcome != 'success'
         uses: actions/download-artifact@v7
         with:
           pattern: lib-*
