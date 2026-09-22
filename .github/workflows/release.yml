@@ -79,9 +79,11 @@ jobs:
       - name: 上传平台产物
         uses: actions/upload-artifact@v7
         with:
+          # 默认 zip 归档 + 显式名字 + 单文件 path：action 间传递走最标准路径
+          # （archive:false 的非压缩单文件模式在 download-artifact@v7 的
+          #   下载/解包路径上稳定失败，弃用）
           name: lib-${{ matrix.label }}
-          path: stage/*
-          archive: false
+          path: stage/${{ matrix.artifact }}
 
   dev-package:
     name: development 包（仅 push）
@@ -99,9 +101,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v7
         with:
-          # archive:false 上传时 artifact 名即文件 basename（name 输入被忽略），
-          # 故按文件名 glob 匹配三平台产物
-          pattern: focus_capture*
+          pattern: lib-*
           path: libs
           merge-multiple: true
 
@@ -109,7 +109,7 @@ jobs:
         if: steps.dl.outcome != 'success'
         uses: actions/download-artifact@v7
         with:
-          pattern: focus_capture*
+          pattern: lib-*
           path: libs
           merge-multiple: true
 
@@ -153,9 +153,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v7
         with:
-          # archive:false 上传时 artifact 名即文件 basename（name 输入被忽略），
-          # 故按文件名 glob 匹配三平台产物
-          pattern: focus_capture*
+          pattern: lib-*
           path: libs
           merge-multiple: true
 
@@ -163,7 +161,7 @@ jobs:
         if: steps.dl.outcome != 'success'
         uses: actions/download-artifact@v7
         with:
-          pattern: focus_capture*
+          pattern: lib-*
           path: libs
           merge-multiple: true
 
