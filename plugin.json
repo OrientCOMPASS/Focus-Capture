@@ -99,5 +99,6 @@
   "repository": "https://github.com/OrientCOMPASS/Focus-Capture",
   "homepage": "https://github.com/OrientCOMPASS/Focus-Capture",
   "updateUrl": "https://github.com/OrientCOMPASS/Focus-Capture/releases/latest/download/plugin.json",
+  "downloadUrl": "https://github.com/OrientCOMPASS/Focus-Capture/releases/latest/download/plugin.zip",
   "readmeUrl": "https://raw.githubusercontent.com/OrientCOMPASS/Focus-Capture/refs/heads/main/README.md"
 }
